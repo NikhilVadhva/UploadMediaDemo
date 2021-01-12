@@ -1,0 +1,13 @@
+<resources>
+
+    <style name="Btn_842014_Border_filled_white">
+        <item name="android:background">@drawable/bg_maroon_border</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:textColor">@color/color_842014</item>
+        <item name="elevation">3dp</item>
+        <item name="android:gravity">center</item>
+        <item name="android:foreground">?selectableItemBackgroundBorderless</item>
+    </style>
+
+</resources>
+
