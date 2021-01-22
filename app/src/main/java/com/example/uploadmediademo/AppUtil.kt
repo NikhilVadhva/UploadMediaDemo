@@ -1,8 +1,10 @@
 package com.example.uploadmediademo
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.content.ContentUris
 import android.content.Context
+import android.content.Intent
 import android.database.Cursor
 import android.graphics.*
 import android.media.ExifInterface
@@ -10,15 +12,22 @@ import android.net.Uri
 import android.os.Build
 import android.provider.DocumentsContract
 import android.provider.MediaStore
+import android.provider.Settings
 import android.text.TextUtils
 import android.util.Log
 import android.webkit.MimeTypeMap
-import okhttp3.MediaType
-import okhttp3.MultipartBody
-import okhttp3.RequestBody
-import java.io.File
-import okhttp3.MediaType.Companion.toMediaType
+import androidx.documentfile.provider.DocumentFile
+import com.google.android.material.snackbar.Snackbar
+import com.karumi.dexter.Dexter
+import com.karumi.dexter.MultiplePermissionsReport
+import com.karumi.dexter.PermissionToken
+import com.karumi.dexter.listener.PermissionRequest
+import com.karumi.dexter.listener.multi.MultiplePermissionsListener
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.MultipartBody
+import okhttp3.MultipartBody.Part.Companion.createFormData
+import okhttp3.RequestBody.Companion.asRequestBody
+import java.io.File
 import java.io.FileNotFoundException
 import java.io.FileOutputStream
 import java.io.IOException
@@ -26,6 +35,8 @@ import java.util.*
 
 
 object AppUtil {
+
+    private val TAG = "MyImages"
 
     @SuppressLint("ObsoleteSdkInt")
     fun getRealPathFromURI(context: Context, uri: Uri): String? {
@@ -156,7 +167,7 @@ object AppUtil {
         return "com.google.android.apps.photos.content" == uri.authority
     }
 
-    fun compressImage(context: Context,imageUri: Uri): String? {
+    fun getCompressImage(context: Context,imageUri: Uri): String? {
         val filePath = getRealPathFromURI(context,imageUri)
         var scaledBitmap: Bitmap? = null
         val options = BitmapFactory.Options()
@@ -298,11 +309,21 @@ object AppUtil {
     private fun getFilename(context: Context): String? {
         val file =
             File(context.getExternalFilesDir(null)!!.absolutePath, "MyFolder/Images")
+        Log.i(TAG,"Image Size After Compressed: "+ getFileSize(file))
         if (!file.exists()) {
             file.mkdirs()
         }
+
+
         return file.getAbsolutePath()
             .toString() + "/" + System.currentTimeMillis() + ".jpg"
+    }
+
+    fun getMediaMultiPart(profileImagePath: String, key: String): MultipartBody.Part {
+        val file = File(profileImagePath)
+        val requestFileProfilePic =
+            file.asRequestBody(getMimeType(profileImagePath)!!.toMediaTypeOrNull())
+        return createFormData(key, file.name, requestFileProfilePic)
     }
 
 
@@ -325,6 +346,116 @@ object AppUtil {
             extension = extension.substring(extension.lastIndexOf("."))
         }
         return type_map.getMimeTypeFromExtension(extension)
+    }
+
+
+    fun askFilePermission(activity: MainActivity,
+        onPermissionGrantListener: OnPermissionGrantListener
+    ) {
+        val permission: MutableList<String> =
+            ArrayList()
+        permission.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        permission.add(Manifest.permission.READ_EXTERNAL_STORAGE)
+            requestPermission(
+            activity,
+            permission,
+            onPermissionGrantListener
+        )
+    }
+
+
+
+    /**
+     * Requesting multiple permissions (storage and camera) at once
+     * This uses multiple permission model from dexter
+     * On permanent denial opens settings dialog
+     */
+
+    fun requestPermission(
+        activity: MainActivity,
+        permission: List<String?>?,
+        onPermissionGrantListener: OnPermissionGrantListener
+    ) {
+        Dexter.withActivity(activity).withPermissions(permission)
+            .withListener(object : MultiplePermissionsListener {
+                override fun onPermissionsChecked(report: MultiplePermissionsReport) {
+                    // check if all permissions are granted or not
+                    if (report.areAllPermissionsGranted()) {
+                        onPermissionGrantListener.onPermissionGrantSuccess()
+                    }
+                    // check for permanent denial of any permission show alert dialog
+                    if (report.isAnyPermissionPermanentlyDenied) {
+                        // open Settings activity
+                        showSettingsDialog(activity)
+                    }
+                }
+
+                override fun onPermissionRationaleShouldBeShown(
+                    permissions: List<PermissionRequest>,
+                    token: PermissionToken
+                ) {
+                    token.continuePermissionRequest()
+                }
+            })
+            .onSameThread()
+            .check()
+    }
+
+
+    /**
+     * Showing Alert Dialog with Settings option in case of deny any permission
+     */
+    private fun showSettingsDialog(activity: MainActivity) {
+        val snackbar: Snackbar = Snackbar
+            .make(
+                activity.findViewById(android.R.id.content),
+                activity.getString(R.string.permission),
+                Snackbar.LENGTH_LONG
+            )
+            .setAction(
+                R.string.snakeBarEnable,
+                { v -> openSettings(activity) })
+        snackbar.show()
+    }
+
+    // navigating settings app
+    private fun openSettings(activity: MainActivity) {
+        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+        val uri =
+            Uri.fromParts("package", activity.getPackageName(), null)
+        intent.data = uri
+        activity.startActivityForResult(intent, 101)
+    }
+
+
+    interface OnPermissionGrantListener {
+        fun onPermissionGrantSuccess()
+    }
+
+     fun  getFileSize(context: Context,filePath : Uri) : String?
+    {
+        //val file = File(filePath.lastPathSegment.toString())
+        val fileSize  = DocumentFile.fromSingleUri(context,filePath)!!.length()
+        val fileSizeInBytes = fileSize
+        Log.i(TAG,"FileSizeBytes:"+fileSizeInBytes)
+        val fileSizeInKB: Float = (fileSizeInBytes/1024).toFloat()
+        Log.i(TAG,"FileSizeKB:"+fileSizeInKB)
+        val fileSizeInMB: Float = fileSizeInKB/1024
+        Log.i(TAG,"FileSizeMB:"+fileSizeInMB)
+
+        return (fileSizeInMB).toString()
+    }
+
+    fun  getFileSize(file : File) : String?
+    {
+        val fileSizeInBytes = file.length()
+        Log.i(TAG,"FileSizeBytes:"+fileSizeInBytes)
+        val fileSizeInKB: Float = (fileSizeInBytes/1024).toFloat()
+        Log.i(TAG,"FileSizeKB:"+fileSizeInKB)
+        val fileSizeInMB: Float = fileSizeInKB/1024
+        Log.i(TAG,"FileSizeMB:"+fileSizeInMB)
+
+        return (fileSizeInMB).toString()
     }
 
 }

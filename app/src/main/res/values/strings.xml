@@ -3,4 +3,6 @@
     <string name="downUP">Upload and Download Images</string>
     <string name="upload">Upload Images</string>
     <string name="download">Download Images</string>
+    <string name="permission">Please Grant permissions.</string>
+    <string name="snakeBarEnable">Enable</string>
 </resources>

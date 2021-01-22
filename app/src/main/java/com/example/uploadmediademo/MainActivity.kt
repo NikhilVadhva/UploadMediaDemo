@@ -3,28 +3,29 @@ package com.example.uploadmediademo
 import android.Manifest
 import android.app.Activity
 import android.content.Intent
-import android.net.Uri
+import android.content.pm.PackageManager
 import android.os.Bundle
 import android.provider.MediaStore
 import android.util.Log
-import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
-import com.karumi.dexter.Dexter
-import com.karumi.dexter.MultiplePermissionsReport
-import com.karumi.dexter.PermissionToken
-import com.karumi.dexter.listener.DexterError
-import com.karumi.dexter.listener.PermissionRequest
-import com.karumi.dexter.listener.multi.MultiplePermissionsListener
+import androidx.core.app.ActivityCompat
+import androidx.work.Data
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
+import androidx.work.WorkRequest
+import com.google.gson.Gson
 import kotlinx.android.synthetic.main.activity_main.*
 
 
-class MainActivity : AppCompatActivity() {
+class MainActivity : AppCompatActivity() , AppUtil.OnPermissionGrantListener{
 
     private val PICK_IMAGES_CODE = 101;
     private val TAG = "MyImages"
 
-    // store uri of picked images
-    private val images: ArrayList<Uri>? = null
+
+    // store compressed images path of picked images
+    private val imageList = ArrayList<String>()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -36,9 +37,25 @@ class MainActivity : AppCompatActivity() {
     private fun initListener() {
         btUpload.setOnClickListener()
         {
-            requestStoragePermission();
-            pickImages()
+            if(isReadFilePermissionGranted())
+            {
+                pickImages()
+            } else {
+                AppUtil.askFilePermission(this, this)
+            }
         }
+    }
+
+
+    fun isReadFilePermissionGranted(): Boolean {
+        return (ActivityCompat.checkSelfPermission(
+            this,
+            Manifest.permission.READ_EXTERNAL_STORAGE
+        ) == PackageManager.PERMISSION_GRANTED
+                || ActivityCompat.checkSelfPermission(
+            this,
+            Manifest.permission.WRITE_EXTERNAL_STORAGE
+        ) == PackageManager.PERMISSION_GRANTED)
     }
 
 
@@ -48,45 +65,24 @@ class MainActivity : AppCompatActivity() {
         //intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
         //intent.action =
        // intent.addCategory(Intent.CATEGORY_OPENABLE)
-        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        //intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+        intent.setAction(Intent.ACTION_GET_CONTENT);
+        intent.setData(MediaStore.Images.Media.EXTERNAL_CONTENT_URI);
         startActivityForResult(Intent.createChooser(intent, "Select Image(s)"), PICK_IMAGES_CODE)
     }
 
 
-    /**
-     * Requesting multiple permissions (storage and camera) at once
-     * This uses multiple permission model from dexter
-     * On permanent denial opens settings dialog
-     */
-    private fun requestStoragePermission() {
-        Dexter.withActivity(this)
-            .withPermissions(Manifest.permission.WRITE_EXTERNAL_STORAGE, Manifest.permission.CAMERA)
-            .withListener(object : MultiplePermissionsListener {
-                override fun onPermissionsChecked(report: MultiplePermissionsReport) {
-                    // check if all permissions are granted
-                    if (report.areAllPermissionsGranted()) {
-                        pickImages()
-                    }
-                    // check for permanent denial of any permission
-                    if (report.isAnyPermissionPermanentlyDenied) {
-                        // show alert dialog navigating to Settings
-                        pickImages()
-                    }
-                }
+    private fun callUploadImageAPI()
+    {
+        // passing multiPartList to Worker class
+        val gson  = Gson()
+        val imagesString = gson.toJson(imageList)
+        val data = Data.Builder().putString("MyImages",imagesString)
+        val uploadImageRequest : WorkRequest = OneTimeWorkRequestBuilder<UploadImages>()
+                                          .setInputData(data.build()).build()
+        WorkManager.getInstance(this).enqueue(uploadImageRequest)
 
-                override fun onPermissionRationaleShouldBeShown(
-                    permissions: List<PermissionRequest?>?,
-                    token: PermissionToken
-                ) {
-                    token.continuePermissionRequest()
-                }
-            })
-            .withErrorListener { error: DexterError? ->
-                Toast.makeText(applicationContext, "Error occurred! ", Toast.LENGTH_SHORT)
-                    .show()
-            }
-            .onSameThread()
-            .check()
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
@@ -96,19 +92,34 @@ class MainActivity : AppCompatActivity() {
             if (data!!.clipData != null) {
                 // get number of images
                 val count = data.clipData!!.itemCount
+                Log.i(TAG,"File Count : "+count)
                 for (i in 0 until count) {
                     val imageUri = data.clipData!!.getItemAt(i).uri
-                    images!!.add(imageUri)
-                    Log.i(TAG,""+images[i])
+                    Log.i(TAG,"ImageUri "+i+": "+imageUri)
+                    val fileSize = AppUtil.getFileSize(this,imageUri)
+                    Log.i(TAG,"Image Size Before Compressed: "+fileSize)
+                    val compressedImage: String? = AppUtil.getCompressImage(this,imageUri)
+                    Log.i(TAG,"Compressed Image Uri "+i+": "+compressedImage)
+                    imageList.add(compressedImage!!)
+                    //Log.i(TAG,""+imageList[i])
                 }
-
 
             } else {
                 // picked single images
                 val imageUri = data.data!!
-                images!!.add(imageUri)
-                Log.i(TAG,""+images[0])
+                Log.i(TAG,"ImageUri :"+imageUri)
+                val compressedImage: String? = AppUtil.getCompressImage(this,imageUri)
+                Log.i(TAG,"Compressed Image Uri :"+compressedImage)
+                imageList.add(compressedImage!!)
+                //Log.i(TAG,""+imageList[0])
             }
+
+            callUploadImageAPI()
+
         }
+    }
+
+    override fun onPermissionGrantSuccess() {
+        pickImages()
     }
 }
